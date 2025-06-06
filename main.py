@@ -9,7 +9,6 @@ from ta.trend import MACD
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
 bot = TeleBot(TELEGRAM_TOKEN)
-COIN_LIST = ["BTCUSDT"]
 
 TIMEFRAMES = {
     "15m": "15 dakika",
@@ -48,7 +47,7 @@ def calculate_score(df):
 
     # RSI
     if latest_rsi > 70:
-        score += 1  # aşırı alım
+        score += 1
     elif latest_rsi > 55:
         score += 2
     elif latest_rsi > 45:
@@ -70,7 +69,7 @@ def calculate_score(df):
     else:
         score += 1
 
-    # Golden/Death Cross (Küçük çaplı)
+    # Golden/Death Cross
     ema50 = EMAIndicator(close, window=50).ema_indicator()
     ema200 = EMAIndicator(close, window=200).ema_indicator()
     if ema50.iloc[-1] > ema200.iloc[-1]:
@@ -117,13 +116,23 @@ def analyze_coin(symbol):
 
     return message
 
+def is_valid_symbol(symbol):
+    url = "https://api.binance.com/api/v3/exchangeInfo"
+    response = requests.get(url)
+    data = response.json()
+    valid_symbols = [s["symbol"] for s in data["symbols"] if s["symbol"].endswith("USDT")]
+    return symbol in valid_symbols
+
 @bot.message_handler(func=lambda msg: True)
 def handle_message(message):
-    text = message.text.upper()
-    if text in COIN_LIST:
-        result = analyze_coin(text)
-        bot.send_message(message.chat.id, result)
+    text = message.text.strip().upper()
+    if is_valid_symbol(text):
+        try:
+            result = analyze_coin(text)
+            bot.send_message(message.chat.id, result)
+        except Exception as e:
+            bot.send_message(message.chat.id, f"⚠️ Teknik analiz sırasında hata oluştu:\n{str(e)}")
     else:
-        bot.send_message(message.chat.id, "Coin desteklenmiyor veya yanlış yazıldı.")
+        bot.send_message(message.chat.id, "❌ Coin desteklenmiyor veya yanlış yazıldı.")
 
 bot.polling()
