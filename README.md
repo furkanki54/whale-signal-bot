@@ -1,1 +1,1 @@
-# teknik-analiz-botu
+# whale-signal-bot
