@@ -1,0 +1,1 @@
+# teknik-analiz-botu
