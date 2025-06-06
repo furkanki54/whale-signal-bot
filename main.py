@@ -1,3 +1,9 @@
+from telebot import TeleBot
+from config import TELEGRAM_TOKEN
+bot = TeleBot(TELEGRAM_TOKEN)
+
+# 🔥 Bu satırı ekle
+bot.remove_webhook()
 import telebot
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from helpers import analyze_coin
