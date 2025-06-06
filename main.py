@@ -1,99 +1,129 @@
 import requests
+import pandas as pd
 import numpy as np
+from datetime import datetime
 from telebot import TeleBot
+from ta.trend import EMAIndicator
+from ta.momentum import RSIIndicator
+from ta.trend import MACD
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
 bot = TeleBot(TELEGRAM_TOKEN)
+COIN_LIST = ["BTCUSDT"]
 
-def get_klines(symbol, interval="1h", limit=100):
+TIMEFRAMES = {
+    "15m": "15 dakika",
+    "1h": "1 saat",
+    "4h": "4 saat",
+    "1d": "Günlük"
+}
+
+def get_klines(symbol, interval, limit=100):
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    r = requests.get(url)
-    return r.json()
+    response = requests.get(url)
+    data = response.json()
+    df = pd.DataFrame(data, columns=[
+        "timestamp", "open", "high", "low", "close", "volume", "close_time",
+        "quote_asset_volume", "number_of_trades", "taker_buy_base_asset_volume",
+        "taker_buy_quote_asset_volume", "ignore"
+    ])
+    df["close"] = pd.to_numeric(df["close"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+    return df
 
-def rsi(data, period=14):
-    close = np.array([float(x[4]) for x in data])
-    delta = np.diff(close)
-    gain = np.where(delta > 0, delta, 0)
-    loss = np.where(delta < 0, -delta, 0)
-    avg_gain = np.convolve(gain, np.ones(period), 'valid') / period
-    avg_loss = np.convolve(loss, np.ones(period), 'valid') / period
-    rs = avg_gain / (avg_loss + 1e-10)
-    rsi = 100 - (100 / (1 + rs))
-    return rsi[-1]
+def calculate_score(df):
+    score = 0
+    close = df["close"]
+    
+    rsi = RSIIndicator(close).rsi()
+    macd_line = MACD(close).macd()
+    macd_signal = MACD(close).macd_signal()
+    ema = EMAIndicator(close, window=20).ema_indicator()
 
-def macd(data):
-    close = np.array([float(x[4]) for x in data])
-    ema12 = close[-12:].mean()
-    ema26 = close[-26:].mean()
-    return ema12 - ema26
+    latest_rsi = rsi.iloc[-1]
+    latest_macd = macd_line.iloc[-1]
+    latest_macd_signal = macd_signal.iloc[-1]
+    latest_price = close.iloc[-1]
+    latest_ema = ema.iloc[-1]
 
-def ema(data, period=50):
-    close = np.array([float(x[4]) for x in data])
-    weights = np.exp(np.linspace(-1., 0., period))
-    weights /= weights.sum()
-    a = np.convolve(close, weights, mode='full')[:len(close)]
-    return a[-1]
+    # RSI
+    if latest_rsi > 70:
+        score += 1  # aşırı alım
+    elif latest_rsi > 55:
+        score += 2
+    elif latest_rsi > 45:
+        score += 1.5
+    elif latest_rsi < 30:
+        score += 0
+    else:
+        score += 1
 
-def analyze(symbol):
-    intervals = ["15m", "1h", "4h", "1d"]
-    scores = []
+    # MACD
+    if latest_macd > latest_macd_signal:
+        score += 2.5
+    else:
+        score += 1
+
+    # EMA
+    if latest_price > latest_ema:
+        score += 2
+    else:
+        score += 1
+
+    # Golden/Death Cross (Küçük çaplı)
+    ema50 = EMAIndicator(close, window=50).ema_indicator()
+    ema200 = EMAIndicator(close, window=200).ema_indicator()
+    if ema50.iloc[-1] > ema200.iloc[-1]:
+        score += 2  # Golden cross
+    else:
+        score += 0.5  # Death cross
+
+    return round(score, 2)
+
+def analyze_coin(symbol):
+    scores = {}
     messages = []
+    for tf in TIMEFRAMES:
+        df = get_klines(symbol, tf)
+        score = calculate_score(df)
+        scores[tf] = score
 
-    for interval in intervals:
-        data = get_klines(symbol, interval, 100)
-        if not data or len(data) < 60:
-            messages.append(f"❌ {interval} verisi eksik.")
-            continue
-
-        rsi_val = rsi(data)
-        macd_val = macd(data)
-        ema_val = ema(data)
-
-        score = 0
-        comment = []
-
-        if rsi_val > 70:
-            comment.append("RSI yüksek (aşırı alım)")
-        elif rsi_val < 30:
-            comment.append("RSI düşük (aşırı satım)")
-            score += 2
+        if score >= 7:
+            label = "Güçlü Boğa"
+        elif score >= 5:
+            label = "Boğa"
+        elif score >= 3.5:
+            label = "Nötr"
         else:
-            comment.append("RSI nötr")
+            label = "Ayı"
 
-        if macd_val > 0:
-            comment.append("MACD al sinyali")
-            score += 1
-        else:
-            comment.append("MACD sat sinyali")
+        messages.append(f"⏱ {TIMEFRAMES[tf]}: {score}/10 → {label}")
 
-        if float(data[-1][4]) > ema_val:
-            comment.append("Fiyat EMA üstünde (boğa)")
-            score += 1
-        else:
-            comment.append("Fiyat EMA altında (ayı)")
+    avg_score = round(np.mean(list(scores.values())), 2)
+    if avg_score >= 7:
+        final = "📈 Güçlü Boğa"
+    elif avg_score >= 5:
+        final = "📈 Boğa"
+    elif avg_score >= 3.5:
+        final = "📊 Nötr"
+    else:
+        final = "📉 Ayı"
 
-        messages.append(f"⏱ {interval} → Puan: {score}/4\n• " + "\n• ".join(comment))
-        scores.append(score)
+    price = get_klines(symbol, "1h")["close"].iloc[-1]
 
-    avg_score = round(np.mean(scores), 2)
-    mood = "📈 Boğa" if avg_score >= 2 else "📉 Ayı"
+    message = f"📊 {symbol} Teknik Analiz Özeti\n\n" + "\n".join(messages)
+    message += f"\n\n🔎 Ortalama: {avg_score}/10\n💬 Genel Yorum: {final}"
+    message += f"\n💵 Güncel Fiyat: {round(price, 2)} USDT"
 
-    price = float(data[-1][4])
-    result = f"""📊 {symbol} Teknik Analizi:
-Fiyat: ${price}
-{chr(10).join(messages)}
-
-🔎 Ortalama Skor: {avg_score}/4 → {mood}
-"""
-    return result
+    return message
 
 @bot.message_handler(func=lambda msg: True)
-def handle_message(msg):
-    symbol = msg.text.strip().upper()
-    try:
-        result = analyze(symbol)
-        bot.send_message(msg.chat.id, result)
-    except Exception as e:
-        bot.send_message(msg.chat.id, f"⚠️ Hata: {e}")
+def handle_message(message):
+    text = message.text.upper()
+    if text in COIN_LIST:
+        result = analyze_coin(text)
+        bot.send_message(message.chat.id, result)
+    else:
+        bot.send_message(message.chat.id, "Coin desteklenmiyor veya yanlış yazıldı.")
 
 bot.polling()
