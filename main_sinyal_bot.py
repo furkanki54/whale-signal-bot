@@ -1,72 +1,64 @@
 import requests
+import pandas as pd
 import time
-from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
-from coin_list import coin_list
+from telebot import TeleBot
+from config import TOKEN, CHAT_ID, VOLUME_THRESHOLD, PRICE_THRESHOLD
 
-def get_binance_data(symbol):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=5m&limit=6"
-    try:
-        response = requests.get(url)
-        data = response.json()
-        if isinstance(data, list) and len(data) == 6:
-            return data
+bot = TeleBot(TOKEN)
+
+# Coin listesini oku
+def load_coin_list():
+    with open("coin_list.txt", "r") as f:
+        return [line.strip().upper() for line in f.readlines()]
+
+# Binance API'den son 2 mumu çek
+def get_ohlcv(symbol, interval="1h", limit=2):
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    r = requests.get(url)
+    if r.status_code != 200:
         return None
-    except Exception as e:
-        print(f"HATA: {symbol} verisi çekilemedi → {e}")
+    data = r.json()
+    df = pd.DataFrame(data, columns=[
+        'time', 'open', 'high', 'low', 'close', 'volume',
+        'close_time', 'quote_asset_volume', 'number_of_trades',
+        'taker_buy_base', 'taker_buy_quote', 'ignore'
+    ])
+    df["close"] = df["close"].astype(float)
+    df["volume"] = df["volume"].astype(float)
+    return df
+
+# Sinyal üret
+def check_signal(symbol):
+    df = get_ohlcv(symbol)
+    if df is None or len(df) < 2:
         return None
 
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
-    try:
-        requests.post(url, data=payload)
-    except Exception as e:
-        print(f"Telegram mesaj hatası → {e}")
+    prev = df.iloc[-2]
+    last = df.iloc[-1]
 
-def analyze_coin(symbol):
-    data = get_binance_data(symbol)
-    if not data:
-        return
+    price_change = ((last["close"] - prev["close"]) / prev["close"]) * 100
+    volume_change = ((last["volume"] - prev["volume"]) / prev["volume"]) * 100
 
-    try:
-        # Son 5 mumdan hacim ortalaması al
-        volumes = [float(k[5]) for k in data[:-1]]
-        avg_volume = sum(volumes) / len(volumes)
-        last_volume = float(data[-1][5])
-        volume_change = ((last_volume - avg_volume) / avg_volume) * 100 if avg_volume > 0 else 0
+    if volume_change >= VOLUME_THRESHOLD and abs(price_change) >= PRICE_THRESHOLD:
+        direction = "📈 Fiyat YÜKSELDİ" if price_change > 0 else "📉 Fiyat DÜŞTÜ"
+        return f"""
+🐳 *BALİNA SİNYALİ* — {symbol}
+{direction}
+Fiyat Değişimi: %{round(price_change, 2)}
+Hacim Değişimi: %{round(volume_change, 2)}
+"""
+    return None
 
-        # Fiyat değişimi: son mum open/close
-        open_price = float(data[-1][1])
-        close_price = float(data[-1][4])
-        price_change = ((close_price - open_price) / open_price) * 100
-
-        if volume_change >= 30 and abs(price_change) >= 3:
-            direction = "📈 YÜKSELİŞ" if price_change > 0 else "📉 DÜŞÜŞ"
-            message = (
-                f"🚨 *Sinyal Tespit Edildi!*\n\n"
-                f"🪙 Coin: `{symbol}`\n"
-                f"💰 Fiyat: {close_price:.4f} USDT\n"
-                f"📊 Fiyat Değişimi: %{price_change:.2f}\n"
-                f"📈 Hacim Artışı: %{volume_change:.2f}\n"
-                f"{direction} 🐋 Balina Aktivitesi!"
-            )
-            send_telegram_message(message)
-
-    except Exception as e:
-        print(f"{symbol} işlenirken hata: {e}")
-
-def main():
-    while True:
-        for symbol in coin_list:
-            if symbol.endswith("USDT"):
-                analyze_coin(symbol)
-            time.sleep(0.2)
-        print("✅ 5 dakikalık analiz tamamlandı. Bekleniyor...")
-        time.sleep(300)
+# Ana döngü
+def run():
+    coin_list = load_coin_list()
+    for symbol in coin_list:
+        try:
+            signal = check_signal(symbol)
+            if signal:
+                bot.send_message(chat_id=CHAT_ID, text=signal, parse_mode="Markdown")
+        except Exception as e:
+            print(f"{symbol} için hata: {e}")
 
 if __name__ == "__main__":
-    main()
+    run()
