@@ -12,7 +12,7 @@ def load_coin_list():
         return [line.strip().upper() for line in f.readlines()]
 
 # Binance API'den son 2 mumu çek
-def get_ohlcv(symbol, interval="1h", limit=2):
+def get_ohlcv(symbol, interval="5m", limit=2):
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     r = requests.get(url)
     if r.status_code != 200:
