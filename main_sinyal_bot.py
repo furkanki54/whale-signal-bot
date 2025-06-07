@@ -11,7 +11,7 @@ def load_coin_list():
     with open("coin_list.txt", "r") as f:
         return [line.strip().upper() for line in f.readlines()]
 
-# Binance API'den son 2 mumu çek
+# Binance API'den 5 dakikalık son 2 mumu çek
 def get_ohlcv(symbol, interval="5m", limit=2):
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     r = requests.get(url)
@@ -49,8 +49,8 @@ Hacim Değişimi: %{round(volume_change, 2)}
 """
     return None
 
-# Ana döngü
-def run():
+# Ana kontrol fonksiyonu
+def run_once():
     coin_list = load_coin_list()
     for symbol in coin_list:
         try:
@@ -60,5 +60,10 @@ def run():
         except Exception as e:
             print(f"{symbol} için hata: {e}")
 
+# Sonsuz döngü
 if __name__ == "__main__":
-    run()
+    while True:
+        print("🕵️‍♂️ Yeni tarama başlıyor...")
+        run_once()
+        print("⏳ 5 dakika bekleniyor...\n")
+        time.sleep(300)
