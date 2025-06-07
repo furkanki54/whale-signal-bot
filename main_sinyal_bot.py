@@ -1,69 +1,71 @@
 import requests
-import pandas as pd
 import time
-from telebot import TeleBot
-from config import TOKEN, CHAT_ID, VOLUME_THRESHOLD, PRICE_THRESHOLD
+import pandas as pd
+from datetime import datetime
+import telebot
 
-bot = TeleBot(TOKEN)
+# ✅ Yeni token burada
+TELEGRAM_TOKEN = "7724826009:AAF_WF8Uij2_LecA19I3oQ9b06YsGAQGovE"
+CHAT_ID = "-1002549376225"
 
-# Coin listesini oku
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
+# Coin listesi dosyadan alınır
 def load_coin_list():
     with open("coin_list.txt", "r") as f:
         return [line.strip().upper() for line in f.readlines()]
 
-# Binance API'den 5 dakikalık son 2 mumu çek
-def get_ohlcv(symbol, interval="5m", limit=2):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    r = requests.get(url)
-    if r.status_code != 200:
-        return None
-    data = r.json()
-    df = pd.DataFrame(data, columns=[
-        'time', 'open', 'high', 'low', 'close', 'volume',
-        'close_time', 'quote_asset_volume', 'number_of_trades',
-        'taker_buy_base', 'taker_buy_quote', 'ignore'
-    ])
-    df["close"] = df["close"].astype(float)
-    df["volume"] = df["volume"].astype(float)
-    return df
+# Binance API'den veri çekme
+def get_klines(symbol, interval="5m", limit=2):
+    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        return data
+    return []
 
 # Sinyal üret
 def check_signal(symbol):
-    df = get_ohlcv(symbol)
-    if df is None or len(df) < 2:
+    data = get_klines(symbol)
+    if len(data) < 2:
         return None
 
-    prev = df.iloc[-2]
-    last = df.iloc[-1]
+    prev = data[-2]
+    last = data[-1]
 
-    price_change = ((last["close"] - prev["close"]) / prev["close"]) * 100
-    volume_change = ((last["volume"] - prev["volume"]) / prev["volume"]) * 100
+    prev_vol = float(prev[5])
+    last_vol = float(last[5])
+    prev_close = float(prev[4])
+    last_close = float(last[4])
 
-    if volume_change >= VOLUME_THRESHOLD and abs(price_change) >= PRICE_THRESHOLD:
-        direction = "📈 Fiyat YÜKSELDİ" if price_change > 0 else "📉 Fiyat DÜŞTÜ"
-        return f"""
-🐳 *BALİNA SİNYALİ* — {symbol}
-{direction}
-Fiyat Değişimi: %{round(price_change, 2)}
-Hacim Değişimi: %{round(volume_change, 2)}
-"""
-    return None
+    volume_change = ((last_vol - prev_vol) / prev_vol) * 100
+    price_change = ((last_close - prev_close) / prev_close) * 100
 
-# Ana kontrol fonksiyonu
-def run_once():
-    coin_list = load_coin_list()
-    for symbol in coin_list:
-        try:
-            signal = check_signal(symbol)
-            if signal:
-                bot.send_message(chat_id=CHAT_ID, text=signal, parse_mode="Markdown")
-        except Exception as e:
-            print(f"{symbol} için hata: {e}")
+    if volume_change > 30 and price_change > 5:
+        return f"🚨 BALİNA ALIMI: {symbol}\n📈 Hacim: %{volume_change:.2f} | Fiyat: %{price_change:.2f}"
+    elif volume_change > 30 and price_change < -5:
+        return f"🚨 BALİNA SATIŞI: {symbol}\n📉 Hacim: %{volume_change:.2f} | Fiyat: %{price_change:.2f}"
+    else:
+        return None
 
 # Sonsuz döngü
-if __name__ == "__main__":
+def run():
+    coin_list = load_coin_list()
     while True:
-        print("🕵️‍♂️ Yeni tarama başlıyor...")
-        run_once()
-        print("⏳ 5 dakika bekleniyor...\n")
-        time.sleep(300)
+        print(f"🔁 Yeni tarama: {datetime.now()}")
+        sinyal_sayısı = 0
+        for coin in coin_list:
+            try:
+                sinyal = check_signal(coin)
+                if sinyal:
+                    bot.send_message(CHAT_ID, sinyal)
+                    sinyal_sayısı += 1
+                    time.sleep(1)
+            except Exception as e:
+                print(f"Hata: {coin} - {str(e)}")
+        if sinyal_sayısı == 0:
+            bot.send_message(CHAT_ID, f"✅ {datetime.now().strftime('%H:%M')} - Tarama yapıldı, sinyale rastlanmadı.")
+        time.sleep(300)  # 5 dakika
+
+if __name__ == "__main__":
+    run()
