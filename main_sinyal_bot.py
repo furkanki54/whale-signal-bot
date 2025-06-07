@@ -1,71 +1,74 @@
-import requests
 import time
+import requests
 import pandas as pd
 from datetime import datetime
-import telebot
+from telebot import TeleBot
 
-# ✅ Yeni token burada
+# Telegram ayarları
 TELEGRAM_TOKEN = "7724826009:AAF_WF8Uij2_LecA19I3oQ9b06YsGAQGovE"
 CHAT_ID = "-1002549376225"
+bot = TeleBot(TELEGRAM_TOKEN)
 
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
-
-# Coin listesi dosyadan alınır
+# Coin listesi
 def load_coin_list():
-    with open("coin_list.txt", "r") as f:
-        return [line.strip().upper() for line in f.readlines()]
+    with open("coin_list.txt", "r") as file:
+        return [line.strip().upper() for line in file]
 
-# Binance API'den veri çekme
-def get_klines(symbol, interval="5m", limit=2):
-    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+coin_list = load_coin_list()
+
+# Sinyal gönderme
+def send_signal(message):
+    bot.send_message(CHAT_ID, message)
+
+# Coin verilerini çekme
+def fetch_binance_data(symbol):
+    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval=5m&limit=2"
     response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()
-        return data
-    return []
-
-# Sinyal üret
-def check_signal(symbol):
-    data = get_klines(symbol)
-    if len(data) < 2:
+    data = response.json()
+    if not data or len(data) < 2:
+        return None
+    prev = data[0]
+    last = data[1]
+    try:
+        prev_close = float(prev[4])
+        last_close = float(last[4])
+        prev_vol = float(prev[5])
+        last_vol = float(last[5])
+        price_change = ((last_close - prev_close) / prev_close) * 100
+        vol_change = ((last_vol - prev_vol) / prev_vol) * 100
+        return price_change, vol_change, last_close
+    except:
         return None
 
-    prev = data[-2]
-    last = data[-1]
-
-    prev_vol = float(prev[5])
-    last_vol = float(last[5])
-    prev_close = float(prev[4])
-    last_close = float(last[4])
-
-    volume_change = ((last_vol - prev_vol) / prev_vol) * 100
-    price_change = ((last_close - prev_close) / prev_close) * 100
-
-    if volume_change > 30 and price_change > 5:
-        return f"🚨 BALİNA ALIMI: {symbol}\n📈 Hacim: %{volume_change:.2f} | Fiyat: %{price_change:.2f}"
-    elif volume_change > 30 and price_change < -5:
-        return f"🚨 BALİNA SATIŞI: {symbol}\n📉 Hacim: %{volume_change:.2f} | Fiyat: %{price_change:.2f}"
-    else:
-        return None
-
-# Sonsuz döngü
+# Ana döngü
 def run():
-    coin_list = load_coin_list()
+    no_signal_counter = 0  # Saatlik mesaj için sayaç
     while True:
-        print(f"🔁 Yeni tarama: {datetime.now()}")
-        sinyal_sayısı = 0
+        found_signal = False
         for coin in coin_list:
-            try:
-                sinyal = check_signal(coin)
-                if sinyal:
-                    bot.send_message(CHAT_ID, sinyal)
-                    sinyal_sayısı += 1
-                    time.sleep(1)
-            except Exception as e:
-                print(f"Hata: {coin} - {str(e)}")
-        if sinyal_sayısı == 0:
-            bot.send_message(CHAT_ID, f"✅ {datetime.now().strftime('%H:%M')} - Tarama yapıldı, sinyale rastlanmadı.")
-        time.sleep(300)  # 5 dakika
+            result = fetch_binance_data(coin)
+            if result:
+                price_change, vol_change, price = result
+                if abs(price_change) >= 5 and abs(vol_change) >= 30:
+                    direction = "📈 Fiyat YÜKSELDİ" if price_change > 0 else "📉 Fiyat DÜŞTÜ"
+                    message = f"""
+🚨 Sinyal Tespit Edildi 🚨
+Coin: {coin}
+Fiyat: {price:.2f} USDT
+{direction}
+Hacim Değişimi: %{vol_change:.2f}
+Zaman: {datetime.now().strftime('%H:%M:%S')}
+"""
+                    send_signal(message)
+                    found_signal = True
+
+        if not found_signal:
+            no_signal_counter += 1
+            if no_signal_counter >= 12:  # 5 dk x 12 = 60 dk
+                send_signal(f"📭 Son 1 saatte sinyale rastlanmadı. ({datetime.now().strftime('%H:%M')})")
+                no_signal_counter = 0
+
+        time.sleep(300)  # 5 dakika bekle
 
 if __name__ == "__main__":
     run()
