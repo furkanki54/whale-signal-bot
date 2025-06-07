@@ -4,15 +4,15 @@ from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from coin_list import coin_list
 
 def get_binance_data(symbol):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1h&limit=2"
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=5m&limit=6"
     try:
         response = requests.get(url)
         data = response.json()
-        if isinstance(data, list) and len(data) == 2:
+        if isinstance(data, list) and len(data) == 6:
             return data
         return None
     except Exception as e:
-        print(f"Hata: {symbol} veri çekilemedi -> {e}")
+        print(f"HATA: {symbol} verisi çekilemedi → {e}")
         return None
 
 def send_telegram_message(message):
@@ -25,7 +25,7 @@ def send_telegram_message(message):
     try:
         requests.post(url, data=payload)
     except Exception as e:
-        print(f"Telegram'a mesaj gönderilemedi -> {e}")
+        print(f"Telegram mesaj hatası → {e}")
 
 def analyze_coin(symbol):
     data = get_binance_data(symbol)
@@ -33,42 +33,40 @@ def analyze_coin(symbol):
         return
 
     try:
-        prev = data[0]
-        curr = data[1]
+        # Son 5 mumdan hacim ortalaması al
+        volumes = [float(k[5]) for k in data[:-1]]
+        avg_volume = sum(volumes) / len(volumes)
+        last_volume = float(data[-1][5])
+        volume_change = ((last_volume - avg_volume) / avg_volume) * 100 if avg_volume > 0 else 0
 
-        prev_close = float(prev[4])
-        curr_close = float(curr[4])
-        prev_volume = float(prev[5])
-        curr_volume = float(curr[5])
+        # Fiyat değişimi: son mum open/close
+        open_price = float(data[-1][1])
+        close_price = float(data[-1][4])
+        price_change = ((close_price - open_price) / open_price) * 100
 
-        if prev_volume == 0:
-            return
-
-        price_change = ((curr_close - prev_close) / prev_close) * 100
-        volume_change = ((curr_volume - prev_volume) / prev_volume) * 100
-
-        if abs(price_change) >= 3 and volume_change >= 30:
+        if volume_change >= 30 and abs(price_change) >= 3:
             direction = "📈 YÜKSELİŞ" if price_change > 0 else "📉 DÜŞÜŞ"
             message = (
                 f"🚨 *Sinyal Tespit Edildi!*\n\n"
                 f"🪙 Coin: `{symbol}`\n"
-                f"💰 Fiyat: {curr_close:.4f} USDT\n"
+                f"💰 Fiyat: {close_price:.4f} USDT\n"
                 f"📊 Fiyat Değişimi: %{price_change:.2f}\n"
-                f"📈 Hacim Değişimi: %{volume_change:.2f}\n"
+                f"📈 Hacim Artışı: %{volume_change:.2f}\n"
                 f"{direction} 🐋 Balina Aktivitesi!"
             )
             send_telegram_message(message)
 
     except Exception as e:
-        print(f"Hata oluştu: {symbol} – {str(e)}")
+        print(f"{symbol} işlenirken hata: {e}")
 
 def main():
     while True:
         for symbol in coin_list:
             if symbol.endswith("USDT"):
                 analyze_coin(symbol)
-            time.sleep(0.2)  # Binance rate limit için yavaşlat
-        time.sleep(3600)  # Her saat başı tekrar çalış
+            time.sleep(0.2)
+        print("✅ 5 dakikalık analiz tamamlandı. Bekleniyor...")
+        time.sleep(300)
 
 if __name__ == "__main__":
     main()
