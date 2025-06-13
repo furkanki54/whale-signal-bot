@@ -42,9 +42,7 @@ def fetch_binance_data(symbol):
 
 # Ana döngü
 def run():
-    no_signal_counter = 0  # Saatlik mesaj için sayaç
     while True:
-        found_signal = False
         for coin in coin_list:
             result = fetch_binance_data(coin)
             if result:
@@ -60,13 +58,6 @@ Hacim Değişimi: %{vol_change:.2f}
 Zaman: {datetime.now().strftime('%H:%M:%S')}
 """
                     send_signal(message)
-                    found_signal = True
-
-        if not found_signal:
-            no_signal_counter += 1
-            if no_signal_counter >= 12:  # 5 dk x 12 = 60 dk
-                send_signal(f"📭 Son 1 saatte sinyale rastlanmadı. ({datetime.now().strftime('%H:%M')})")
-                no_signal_counter = 0
 
         time.sleep(300)  # 5 dakika bekle
 
