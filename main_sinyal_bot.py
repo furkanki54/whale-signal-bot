@@ -76,12 +76,16 @@ while True:
         if not price:
             continue
 
-        # Anlık fiyat artışı kontrolü
+        # Anlık fiyat artışı/azalışı kontrolü (%3)
         if symbol in last_prices:
             old_price = last_prices[symbol]
             price_change = ((price - old_price) / old_price) * 100
-            if price_change >= 1.80:
+
+            if price_change >= 3.00:
                 send_signal("🚀 Anlık Yükseliş Tespit Edildi!", symbol, old_price, price, "📈 Hızlı pump olabilir!")
+
+            elif price_change <= -3.00:
+                send_signal("📉 Anlık Düşüş Tespit Edildi!", symbol, old_price, price, "⚠️ Sert satış baskısı olabilir!")
 
         last_prices[symbol] = price
 
@@ -94,5 +98,5 @@ while True:
                 send_signal("🐋 Balina Sinyali Tespit Edildi!", symbol, candle["prev_close"], candle["last_close"],
                             f"💰 Hacim Değişimi: %{hacim_degisim:.2f}\n📊 Fiyat Değişimi: %{fiyat_degisim:.2f}")
 
-    print("⏳ 10 saniye sonra tekrar taranacak...\n")
-    time.sleep(10)
+    print("⏳ 5 dakika sonra tekrar taranacak...\n")
+    time.sleep(300)
