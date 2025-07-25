@@ -10,8 +10,12 @@ bot = TeleBot(TELEGRAM_TOKEN)
 
 # Coin listesi
 def load_coin_list():
-    with open("coin_list.txt", "r") as f:
-        return [line.strip().upper() for line in f.readlines()]
+    try:
+        with open("coin_list.txt", "r") as f:
+            return [line.strip().upper() for line in f if line.strip()]
+    except Exception as e:
+        print(f"[HATA] Coin listesi yüklenemedi: {e}")
+        return []
 
 coin_list = load_coin_list()
 
@@ -22,15 +26,17 @@ last_prices = {}
 def send_signal(title, symbol, old_price, new_price, extra_note=""):
     pct_change = ((new_price - old_price) / old_price) * 100
     now = datetime.now().strftime("%H:%M:%S")
-    msg = f"""
-{title}
-Coin: {symbol}
-Fiyat: {old_price:.4f} → {new_price:.4f} (+{pct_change:.2f}%)
-Zaman: {now}
-
+    msg = f"""📡 {title}
+🪙 Coin: {symbol}
+💰 Fiyat: {old_price:.4f} → {new_price:.4f}  (%{pct_change:.2f})
+⏰ Zaman: {now}
 {extra_note}
 """
-    bot.send_message(CHAT_ID, msg.strip())
+    try:
+        bot.send_message(CHAT_ID, msg.strip())
+        print(f"[SİNYAL GÖNDERİLDİ] {symbol} - {title}")
+    except Exception as e:
+        print(f"[TELEGRAM HATASI] {e}")
 
 # Binance fiyat çek
 def fetch_price(symbol):
@@ -38,7 +44,8 @@ def fetch_price(symbol):
     try:
         r = requests.get(url, timeout=5)
         return float(r.json()['price'])
-    except:
+    except Exception as e:
+        print(f"[FİYAT HATASI] {symbol} - {e}")
         return None
 
 # Binance 5m mum verisi çek (balina sinyali için)
@@ -47,6 +54,8 @@ def fetch_candles(symbol):
     try:
         r = requests.get(url, timeout=5)
         data = r.json()
+        if len(data) < 2:
+            return None
         prev = data[0]
         last = data[1]
         return {
@@ -55,11 +64,13 @@ def fetch_candles(symbol):
             "prev_volume": float(prev[5]),
             "last_volume": float(last[5])
         }
-    except:
+    except Exception as e:
+        print(f"[MUM VERİSİ HATASI] {symbol} - {e}")
         return None
 
 # Ana döngü
 while True:
+    print(f"🔍 TARAMA BAŞLADI - {datetime.now().strftime('%H:%M:%S')}")
     for symbol in coin_list:
         price = fetch_price(symbol)
         if not price:
@@ -81,6 +92,7 @@ while True:
             hacim_degisim = ((candle["last_volume"] - candle["prev_volume"]) / candle["prev_volume"]) * 100
             if fiyat_degisim >= 5 and hacim_degisim >= 30:
                 send_signal("🐋 Balina Sinyali Tespit Edildi!", symbol, candle["prev_close"], candle["last_close"],
-                            f"💰 Hacim: %{hacim_degisim:.2f} | Fiyat: %{fiyat_degisim:.2f}")
+                            f"💰 Hacim Değişimi: %{hacim_degisim:.2f}\n📊 Fiyat Değişimi: %{fiyat_degisim:.2f}")
 
-    time.sleep(10)  # Her 10 saniyede bir tüm coinler taranır
+    print("⏳ 10 saniye sonra tekrar taranacak...\n")
+    time.sleep(10)
